@@ -1,0 +1,88 @@
+# openmc.def
+# Apptainer image for OpenMC 0.15.3
+# Build steps follow README.md: system packages, C++ build, Python package.
+BootStrap: docker
+From: docker.m.daocloud.io/library/ubuntu:24.04
+
+%labels
+    Author  yskj
+    Version openmc_v0.15.3
+    OpenMC  0.15.3
+
+%environment
+    export PATH=/opt/openmc-venv/bin:$PATH
+    export LC_ALL=C.UTF-8
+
+%runscript
+    exec openmc "${@}"
+
+%post
+    set -eux
+    export LC_ALL=C.UTF-8
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/openmc-venv/bin:$PATH
+
+    # Ubuntu 24.04 uses ubuntu.sources; 22.04-style sources.list is kept for safety.
+    if [ -f /etc/apt/sources.list ]; then
+        sed -i 's/archive.ubuntu.com/mirrors.huaweicloud.com/g' /etc/apt/sources.list
+        sed -i 's/security.ubuntu.com/mirrors.huaweicloud.com/g' /etc/apt/sources.list
+    fi
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+        sed -i 's/archive.ubuntu.com/mirrors.huaweicloud.com/g' /etc/apt/sources.list.d/ubuntu.sources
+        sed -i 's/security.ubuntu.com/mirrors.huaweicloud.com/g' /etc/apt/sources.list.d/ubuntu.sources
+    fi
+    apt-get update
+
+    # README 1: compilers and libraries. Python >= 3.11 is required by OpenMC 0.15.3.
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        build-essential \
+        g++ \
+        cmake \
+        pkg-config \
+        libhdf5-dev \
+        libpng-dev \
+        python3 \
+        python3-pip \
+        python3-dev \
+        python3-venv \
+        python-is-python3
+
+    # Avoid Debian/Ubuntu externally-managed-environment (PEP 668).
+    python3 -m venv /opt/openmc-venv
+    python -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/
+
+    # README 2: clone, configure, and install the openmc executable.
+    # v0.15.3 matches the verified build in README (commit 27e38e8). MPI stays off.
+    git clone --recurse-submodules --branch v0.15.3 \
+        https://github.com/openmc-dev/openmc.git /opt/openmc
+    cmake -S /opt/openmc -B /opt/openmc/build
+    cmake --build /opt/openmc/build -j"$(nproc)"
+    cmake --install /opt/openmc/build
+    ldconfig
+
+    # README 3: install the OpenMC Python package from the same source tree.
+    python -m pip install /opt/openmc -i https://mirrors.aliyun.com/pypi/simple/
+
+    openmc --version
+    python -c 'import openmc; print(openmc.__version__)'
+
+    rm -rf /opt/openmc /root/.cache/pip
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%help
+    Build:
+        sudo apptainer build openmc_v0.15.3.sif openmc.def
+
+    Check the executable:
+        apptainer run openmc_v0.15.3.sif --version
+
+    Check the Python API:
+        apptainer exec openmc_v0.15.3.sif python -c "import openmc; print(openmc.__version__)"
+
+    Run a model. Nuclear data is not inside the image; bind it and set OPENMC_CROSS_SECTIONS:
+        apptainer run --bind /path/to/endfb-vii.1-hdf5:/data \
+            --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml \
+            openmc_v0.15.3.sif

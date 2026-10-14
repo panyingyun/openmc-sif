@@ -218,3 +218,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+hello_v0.1.sif
+openmc_v0.15.3.sif
