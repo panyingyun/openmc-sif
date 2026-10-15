@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material id="1" depletable="true">
+    <density units="sum"/>
+    <nuclide name="Pu239" ao="0.037047"/>
+    <nuclide name="Pu240" ao="0.0017512"/>
+    <nuclide name="Pu241" ao="0.00011674"/>
+    <nuclide name="Ga69" ao="0.0008266052159999999"/>
+    <nuclide name="Ga71" ao="0.000548594784"/>
+  </material>
+</materials>

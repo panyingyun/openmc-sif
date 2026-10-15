@@ -1,40 +1,100 @@
-# openmc-sif
-apptainer for openmc
+# 求解器HPC镜像打包、测试和运行
 
-### 1、安装依赖
+### 1. Apptainer HPC求解器容器化
 
-安装一系列依赖包（git,cmake，make等）
+##### (1) Apptainer容器化的好处
+
+把 OpenMC 这类 HPC 求解器，连同编译器、HDF5、Python 等依赖，打成单个只读 `.sif` 镜像后：
+
+- **环境一致**：求解器、编译器和库固化在镜像里，登录节点与计算节点使用同一套环境，避免各节点系统库版本不同导致结果不一致。
+- **单文件分发**：`.sif` 是单个只读文件，便于拷贝、归档，以及在集群之间传递。
+- **普通用户可运行**：不依赖 Docker 守护进程，也不需要 root 即可运行容器，适合多用户共享的 HPC。
+- **接近裸机性能**：与宿主机共享内核，可直接使用宿主机的 CPU、MPI、InfiniBand 和 GPU。
+- **数据与镜像分离**：截面库、作业目录通过 `--bind` 挂进容器，大体量核数据不必打进镜像。
+- **可从 Docker 构建**：定义文件使用 `BootStrap: docker`，可复用已有基础镜像再打包求解器。
+
+##### (2) Apptainer的命令安装方法
+
+HPC 上优先安装非 setuid 版本（依赖内核用户命名空间）。安装完成后用 `apptainer version` 确认。集群若已由管理员安装，用户侧只需确认该命令可用。
+
+Ubuntu（官方 PPA，支持 amd64 和 arm64）：
 
 ```bash
-sudo apt install g++ cmake libhdf5-dev libpng-dev
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository -y ppa:apptainer/ppa
+sudo apt update
+sudo apt install -y apptainer
+apptainer version
 ```
 
-### 2、编译openmc
-
-下载和安装 openmc命令
+Debian，或直接安装 GitHub 上的 amd64 包（当前稳定版 1.5.4）：
 
 ```bash
-git clone --recurse-submodules https://github.com/openmc-dev/openmc.git
-cd openmc
-mkdir build && cd build
-cmake ..
-make
-sudo make install
+sudo apt update
+sudo apt install -y wget
+cd /tmp
+wget https://github.com/apptainer/apptainer/releases/download/v1.5.4/apptainer_1.5.4_amd64.deb
+sudo apt install -y ./apptainer_1.5.4_amd64.deb
+apptainer version
 ```
 
-运行 openmc， 查看安装是否成功，安装位置 
+RHEL、Rocky、AlmaLinux（通过 EPEL）：
 
 ```bash
-$ whereis openmc
-/usr/local/bin/openmc
+sudo dnf install -y epel-release
+sudo dnf install -y apptainer
+apptainer version
+```
 
-$ openmc --version
+没有 root 权限时，安装到用户目录：
+
+```bash
+curl -s https://raw.githubusercontent.com/apptainer/apptainer/main/tools/install-unprivileged.sh | \
+    bash -s - "$HOME/.local/apptainer"
+export PATH="$HOME/.local/apptainer/bin:$PATH"
+apptainer version
+```
+
+### 2. 编译和打包镜像openmc_v0.15.3.sif
+
+在仓库根目录执行 `openmc.sh`。脚本会先准备 OpenMC 源码包，再用 `openmc.def` 打出 `openmc_v0.15.3.sif`。
+
+```bash
+cd /path/to/openmc
+chmod +x openmc.sh
+./openmc.sh
+```
+
+脚本做两件事：
+
+（1） 检查 `dependence/openmc_v0.15.3.tar.gz`。文件不存在时，从内网地址下载：
+
+```bash
+wget http://10.0.1.66:4000/api/download/singularity/openmc/openmc_v0.15.3.tar.gz \
+    -O ./dependence/openmc_v0.15.3.tar.gz
+```
+
+源码包也可以按 `dependence/README.md` 自行准备：检出 `v0.15.3`（含子模块）后打包，放到 `dependence/` 下，文件名保持 `openmc_v0.15.3.tar.gz`。
+
+（2） 用定义文件构建镜像。`openmc.def` 以 Ubuntu 24.04 为基础镜像，在容器内安装编译依赖、解压源码、编译安装 `openmc` 可执行文件和 Python 包，最后得到单个 `.sif`：
+
+```bash
+sudo apptainer build openmc_v0.15.3.sif openmc.def
+```
+
+构建成功后，当前目录会出现 `openmc_v0.15.3.sif`。
+
+### 3. 检查打包镜像是否有效
+
+```bash
+$ apptainer run openmc_v0.15.3.sif openmc --version
 OpenMC version 0.15.3
 Commit hash: 27e38e894697bb32a1dac7848d2618818b6b8daf
 Copyright (c) 2011-2025 MIT, UChicago Argonne LLC, and contributors
 MIT/X license at <https://docs.openmc.org/en/latest/license.html>
 Build type:            RelWithDebInfo
-Compiler ID:           GNU 11.4.0
+Compiler ID:           GNU 13.3.0
 MPI enabled:           no
 Parallel HDF5 enabled: no
 PNG support:           yes
@@ -46,70 +106,21 @@ Profiling flags:       no
 UWUW support:          no
 ```
 
-
-### 3、安装python warp包
-
-在主目录下安装openmc python包, 依赖文件pyproject.toml
+###  4. 测试一下openmc求解器
 
 ```bash
-cd openmc 
-sudo python -m pip install --upgrade pip -i  https://pypi.tuna.tsinghua.edu.cn/simple
-python -m pip install .
+（1） 下载材料数据包并且解压
+      https://openmc.org/data/ ：tar -xvf endfb71.tar.xz
 
-$ pip install .
-Defaulting to user installation because normal site-packages is not writeable
-Processing /home/yypan/openmc/openmc
-  Installing build dependencies ... done
-  Getting requirements to build wheel ... done
-  Preparing metadata (pyproject.toml) ... done
-Requirement already satisfied: numpy>=1.9 in /usr/lib/python3/dist-packages (from openmc==0.13.1) (1.21.5)
-Requirement already satisfied: h5py in /usr/lib/python3/dist-packages (from openmc==0.13.1) (3.6.0)
-Requirement already satisfied: scipy in /usr/lib/python3/dist-packages (from openmc==0.13.1) (1.8.0)
-Requirement already satisfied: ipython in /home/yypan/.local/lib/python3.10/site-packages (from openmc==0.13.1) (8.37.0)
-Requirement already satisfied: matplotlib in /usr/lib/python3/dist-packages (from openmc==0.13.1) (3.5.1)
-Requirement already satisfied: pandas in /usr/lib/python3/dist-packages (from openmc==0.13.1) (1.3.5)
-Requirement already satisfied: lxml in /usr/lib/python3/dist-packages (from openmc==0.13.1) (4.8.0)
-Requirement already satisfied: uncertainties in /home/yypan/.local/lib/python3.10/site-packages (from openmc==0.13.1) (3.2.3)
-Requirement already satisfied: decorator in /usr/lib/python3/dist-packages (from ipython->openmc==0.13.1) (4.4.2)
-Requirement already satisfied: exceptiongroup in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (1.3.1)
-Requirement already satisfied: jedi>=0.16 in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (0.19.2)
-Requirement already satisfied: matplotlib-inline in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (0.2.1)
-Requirement already satisfied: pexpect>4.3 in /usr/lib/python3/dist-packages (from ipython->openmc==0.13.1) (4.8.0)
-Requirement already satisfied: prompt_toolkit<3.1.0,>=3.0.41 in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (3.0.52)
-Requirement already satisfied: pygments>=2.4.0 in /usr/lib/python3/dist-packages (from ipython->openmc==0.13.1) (2.11.2)
-Requirement already satisfied: stack_data in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (0.6.3)
-Requirement already satisfied: traitlets>=5.13.0 in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (5.14.3)
-Requirement already satisfied: typing_extensions>=4.6 in /home/yypan/.local/lib/python3.10/site-packages (from ipython->openmc==0.13.1) (4.15.0)
-Requirement already satisfied: wcwidth in /home/yypan/.local/lib/python3.10/site-packages (from prompt_toolkit<3.1.0,>=3.0.41->ipython->openmc==0.13.1) (0.2.14)
-Requirement already satisfied: parso<0.9.0,>=0.8.4 in /home/yypan/.local/lib/python3.10/site-packages (from jedi>=0.16->ipython->openmc==0.13.1) (0.8.5)
-Requirement already satisfied: executing>=1.2.0 in /home/yypan/.local/lib/python3.10/site-packages (from stack_data->ipython->openmc==0.13.1) (2.2.1)
-Requirement already satisfied: asttokens>=2.1.0 in /home/yypan/.local/lib/python3.10/site-packages (from stack_data->ipython->openmc==0.13.1) (3.0.1)
-Requirement already satisfied: pure-eval in /home/yypan/.local/lib/python3.10/site-packages (from stack_data->ipython->openmc==0.13.1) (0.2.3)
-Building wheels for collected packages: openmc
-  Building wheel for openmc (pyproject.toml) ... done
-  Created wheel for openmc: filename=openmc-0.13.1-cp310-cp310-linux_x86_64.whl size=25834118 sha256=7318934b421a7ee144a1571b6dfab90bb82f34cfe464872c3d1ab99ef794c5a5
-  Stored in directory: /tmp/pip-ephem-wheel-cache-n5_qzj06/wheels/f7/2f/e9/9522e883c5e702a5c272416f186aada84c203fb1fd6d0f9b11
-Successfully built openmc
-Installing collected packages: openmc
-  Attempting uninstall: openmc
-    Found existing installation: openmc 0.13.1
-    Uninstalling openmc-0.13.1:
-      Successfully uninstalled openmc-0.13.1
-Successfully installed openmc-0.13.1
+ (2)  举例加压后目录
+      /home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml
 
-```
+ (3)  运行test目录下的案例-Python启动openmc
+      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml openmc_v0.15.3.sif python3 jezebel.
+      py
 
-
-
-
-### 4、运行示例
-
-```bash
-
-OPENMC_CROSS_SECTIONS="/home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml" python jezebel.py
-或者
-OPENMC_CROSS_SECTIONS="/home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml" openmc
-输出如下：
+ (4)  运行test目录下的案例-二进制启动openmc   
+      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml openmc_v0.15.3.sif openmc
 
                                 %%%%%%%%%%%%%%%
                            %%%%%%%%%%%%%%%%%%%%%%%%
@@ -140,18 +151,18 @@ OPENMC_CROSS_SECTIONS="/home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml" openm
          License | https://docs.openmc.org/en/latest/license.html
          Version | 0.15.3
      Commit Hash | 27e38e894697bb32a1dac7848d2618818b6b8daf
-       Date/Time | 2025-11-27 17:03:07
+       Date/Time | 2026-10-15 16:30:15
   OpenMP Threads | 16
 
  Reading settings XML file...
  Reading cross sections XML file...
  Reading materials XML file...
  Reading geometry XML file...
- Reading Pu239 from /home/yypan/dl/endfb-vii.1-hdf5/neutron/Pu239.h5
- Reading Pu240 from /home/yypan/dl/endfb-vii.1-hdf5/neutron/Pu240.h5
- Reading Pu241 from /home/yypan/dl/endfb-vii.1-hdf5/neutron/Pu241.h5
- Reading Ga69 from /home/yypan/dl/endfb-vii.1-hdf5/neutron/Ga69.h5
- Reading Ga71 from /home/yypan/dl/endfb-vii.1-hdf5/neutron/Ga71.h5
+ Reading Pu239 from /data/neutron/Pu239.h5
+ Reading Pu240 from /data/neutron/Pu240.h5
+ Reading Pu241 from /data/neutron/Pu241.h5
+ Reading Ga69 from /data/neutron/Ga69.h5
+ Reading Ga71 from /data/neutron/Ga71.h5
  Minimum neutron data temperature: 294 K
  Maximum neutron data temperature: 294 K
  Preparing distributed cell instances...
@@ -368,21 +379,21 @@ OPENMC_CROSS_SECTIONS="/home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml" openm
 
  =======================>     TIMING STATISTICS     <=======================
 
- Total time for initialization     = 1.4375e-01 seconds
-   Reading cross sections          = 1.1316e-01 seconds
- Total time in simulation          = 1.0818e+00 seconds
-   Time in transport only          = 9.2284e-01 seconds
-   Time in inactive batches        = 6.1929e-02 seconds
-   Time in active batches          = 1.0199e+00 seconds
-   Time synchronizing fission bank = 1.0656e-01 seconds
-     Sampling source sites         = 9.4626e-02 seconds
-     SEND/RECV source sites        = 1.1174e-02 seconds
-   Time accumulating tallies       = 2.8037e-04 seconds
-   Time writing statepoints        = 5.1687e-03 seconds
- Total time for finalization       = 2.8650e-06 seconds
- Total time elapsed                = 1.2342e+00 seconds
- Calculation Rate (inactive)       = 1.61475e+06 particles/second
- Calculation Rate (active)         = 1.86298e+06 particles/second
+ Total time for initialization     = 8.2994e-02 seconds
+   Reading cross sections          = 7.4000e-02 seconds
+ Total time in simulation          = 1.3120e+00 seconds
+   Time in transport only          = 1.1800e+00 seconds
+   Time in inactive batches        = 8.1143e-02 seconds
+   Time in active batches          = 1.2308e+00 seconds
+   Time synchronizing fission bank = 9.1725e-02 seconds
+     Sampling source sites         = 7.9211e-02 seconds
+     SEND/RECV source sites        = 1.2470e-02 seconds
+   Time accumulating tallies       = 2.3151e-04 seconds
+   Time writing statepoints        = 2.8530e-03 seconds
+ Total time for finalization       = 1.7320e-06 seconds
+ Total time elapsed                = 1.4011e+00 seconds
+ Calculation Rate (inactive)       = 1.23239e+06 particles/second
+ Calculation Rate (active)         = 1.54366e+06 particles/second
 
  ============================>     RESULTS     <============================
 
@@ -394,42 +405,48 @@ OPENMC_CROSS_SECTIONS="/home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml" openm
 
 ```
 
-### 5、运行错误解决
+### 5. 如何加入其他打包加入其他求解器
 
-``` 
-RuntimeError: No cross_sections.xml file was specified in materials.xml or in the OPENMC_CROSS_SECTIONS environment variable
+其他求解器加进当前的 `openmc.def`，和 OpenMC 打进同一个 `.sif`。以求解器 `foo`、版本 `1.2.0` 为例，改定义文件里的三处，然后重新执行 `./openmc.sh`。
 
-下载数据库 https://openmc.org/data/
-
-下载数据: ENDF/B-VII.1
-```
-
-### 6、Build 错误处理
-``` 
-error: passing ‘const fmt::v11::formatter<openmc::Position>’ as ‘this’ argument discards
-
-注释掉对应的打印语句就行，不影响运行
-``` 
-
-
-### 7、如果python版本低于3.11,需要升级python版本，升级版本[不建议操作，可以使用Ubuntu24.04系统]
+(1) 把源码包放到 `dependence/`，并在 `%files` 里和 OpenMC 源码包一起拷进镜像：
 
 ```bash
-
-sudo apt install python3.13 python3.13-venv python3.13-dev -y
-
-查看是否安装成功
-python3.13 --version
-
-创建虚拟环境
-python3.13 -m venv .venv
-
-激活虚拟环境
-source .venv/bin/activate
-
-验证虚拟环境中的 Python 版本
-python --version
-
-退出虚拟环境时，只需运行
-deactivate
+git clone --recurse-submodules --branch v1.2.0 https://example.com/foo.git
+tar czvf dependence/foo_v1.2.0.tar.gz foo/
 ```
+
+```apptainer
+%files
+    ./dependence/openmc_v0.15.3.tar.gz    /opt/
+    ./dependence/foo_v1.2.0.tar.gz        /opt/
+```
+
+(2) 该求解器额外需要的系统库，加到 `%post` 里已有的 `apt-get install` 中。然后在 OpenMC 安装完成之后，接上它自己的编译安装，装到镜像内的默认路径（一般是 `/usr/local`）：
+
+```bash
+cd /opt
+tar zxvf foo_v1.2.0.tar.gz
+cmake -S /opt/foo -B /opt/foo/build
+cmake --build /opt/foo/build -j"$(nproc)"
+cmake --install /opt/foo/build
+ldconfig
+foo --version
+rm -rf /opt/foo
+```
+
+可执行文件若不在默认 `PATH` 上，在 `%environment` 里把安装目录加进去：
+
+```apptainer
+%environment
+    export PATH=/opt/openmc-venv/bin:/opt/foo/bin:$PATH
+    export LC_ALL=C.UTF-8
+```
+
+`%runscript` 仍默认启动 `openmc`。同一个镜像里调用新求解器时用 `exec`：
+
+```bash
+apptainer exec openmc_v0.15.3.sif foo --version
+```
+
+截面库、网格等大体量数据不要打进镜像，运行时用 `--bind` 挂载。

@@ -3,7 +3,6 @@
 # Build steps follow README.md: system packages, C++ build, Python package.
 BootStrap: docker
 From: docker.1ms.run/library/ubuntu:24.04
-# From: harbor.yuansuan.cn/library/ubuntu:24.04
 # From: docker.m.daocloud.io/library/ubuntu:24.04
 
 %labels
@@ -16,7 +15,7 @@ From: docker.1ms.run/library/ubuntu:24.04
     export LC_ALL=C.UTF-8
 
 %runscript
-    exec openmc "${@}"
+    exec "${@}"
 
 %files 
     ./dependence/openmc_v0.15.3.tar.gz    /opt/
