@@ -9,10 +9,17 @@ From: docker.1ms.run/library/ubuntu:24.04
     Author  yskj
     Version openmc_v0.15.3
     OpenMC  0.15.3
+    MPI     OpenMPI
 
 %environment
     export PATH=/opt/openmc-venv/bin:$PATH
     export LC_ALL=C.UTF-8
+    # OpenMPI inside Apptainer: allow root, avoid CMA/vader failures, and
+    # keep PMIx from hanging when no system server is present.
+    export OMPI_ALLOW_RUN_AS_ROOT=1
+    export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+    export OMPI_MCA_btl_vader_single_copy_mechanism=none
+    export PMIX_MCA_gds=hash
 
 %runscript
     exec "${@}"
@@ -47,6 +54,9 @@ From: docker.1ms.run/library/ubuntu:24.04
         pkg-config \
         libhdf5-dev \
         libpng-dev \
+        openmpi-bin \
+        libopenmpi-dev \
+        openssh-client \
         python3 \
         python3-pip \
         python3-dev \
@@ -57,23 +67,29 @@ From: docker.1ms.run/library/ubuntu:24.04
     python3 -m venv /opt/openmc-venv
     python -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/
 
-    # README 2: clone, configure, and install the openmc executable.
-    # v0.15.3 matches the verified build in README (commit 27e38e8). MPI stays off.
+    # README 2: configure and install the openmc executable with MPI.
+    # v0.15.3 matches the verified build in README (commit 27e38e8).
+    # Serial HDF5 is kept on purpose: libhdf5-openmpi-dev conflicts with
+    # libhdf5-dev. Particle transport still runs under MPI; rank 0 writes HDF5.
     #git clone --recurse-submodules --branch v0.15.3 \
     #    https://github.com/openmc-dev/openmc.git /opt/openmc
     cd /opt
     tar zxvf openmc_v0.15.3.tar.gz
     git config --global --add safe.directory /opt/openmc
-    cmake -S /opt/openmc -B /opt/openmc/build
+    cmake -S /opt/openmc -B /opt/openmc/build -DOPENMC_USE_MPI=ON
     cmake --build /opt/openmc/build -j"$(nproc)"
     cmake --install /opt/openmc/build
     ldconfig
 
     # README 3: install the OpenMC Python package from the same source tree.
     python -m pip install /opt/openmc -i https://mirrors.aliyun.com/pypi/simple/
+    # Build mpi4py against this image's OpenMPI, not a wheel that bundles MPICH.
+    python -m pip install --no-binary=mpi4py mpi4py -i https://mirrors.aliyun.com/pypi/simple/
 
     openmc --version
+    openmc --version | grep -q 'MPI enabled:[[:space:]]*yes'
     python -c 'import openmc; print(openmc.__version__)'
+    python -c 'from mpi4py import MPI; print(MPI.Get_library_version())'
 
     rm -rf /opt/openmc /root/.cache/pip
     apt-get clean
@@ -93,3 +109,13 @@ From: docker.1ms.run/library/ubuntu:24.04
         apptainer run --bind /path/to/endfb-vii.1-hdf5:/data \
             --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml \
             openmc_v0.15.3.sif openmc
+
+    MPI on one node. Set OMP_NUM_THREADS so ranks do not each take every core:
+        apptainer exec --bind /path/to/endfb-vii.1-hdf5:/data \
+            --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml \
+            --env OMP_NUM_THREADS=1 \
+            openmc_v0.15.3.sif mpirun -np 4 openmc
+
+    Python API with MPI:
+        apptainer exec openmc_v0.15.3.sif \
+            python -c "import openmc; openmc.run(mpi_args=['mpirun', '-np', '4'])"

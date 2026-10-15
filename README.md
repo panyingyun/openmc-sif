@@ -116,11 +116,17 @@ UWUW support:          no
       /home/yypan/dl/endfb-vii.1-hdf5/cross_sections.xml
 
  (3)  运行test目录下的案例-Python启动openmc
-      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml openmc_v0.15.3.sif python3 jezebel.
+      cd test
+      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml ../openmc_v0.15.3.sif python3 jezebel.
       py
 
  (4)  运行test目录下的案例-二进制启动openmc   
-      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml openmc_v0.15.3.sif openmc
+      cd test
+      apptainer run -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml ../openmc_v0.15.3.sif openmc
+
+ (5)  MPI并向计算
+      cd test
+      apptainer exec -B /home/yypan/dl/endfb-vii.1-hdf5:/data -B $(pwd) --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml --env OMP_NUM_THREADS=1 ../openmc_v0.15.3.sif mpirun -np 4 openmc
 
                                 %%%%%%%%%%%%%%%
                            %%%%%%%%%%%%%%%%%%%%%%%%
