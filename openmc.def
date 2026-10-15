@@ -2,7 +2,9 @@
 # Apptainer image for OpenMC 0.15.3
 # Build steps follow README.md: system packages, C++ build, Python package.
 BootStrap: docker
-From: docker.m.daocloud.io/library/ubuntu:24.04
+From: docker.1ms.run/library/ubuntu:24.04
+# From: harbor.yuansuan.cn/library/ubuntu:24.04
+# From: docker.m.daocloud.io/library/ubuntu:24.04
 
 %labels
     Author  yskj
@@ -15,6 +17,9 @@ From: docker.m.daocloud.io/library/ubuntu:24.04
 
 %runscript
     exec openmc "${@}"
+
+%files 
+    ./dependence/openmc_v0.15.3.tar.gz    /opt/
 
 %post
     set -eux
@@ -55,8 +60,11 @@ From: docker.m.daocloud.io/library/ubuntu:24.04
 
     # README 2: clone, configure, and install the openmc executable.
     # v0.15.3 matches the verified build in README (commit 27e38e8). MPI stays off.
-    git clone --recurse-submodules --branch v0.15.3 \
-        https://github.com/openmc-dev/openmc.git /opt/openmc
+    #git clone --recurse-submodules --branch v0.15.3 \
+    #    https://github.com/openmc-dev/openmc.git /opt/openmc
+    cd /opt
+    tar zxvf openmc_v0.15.3.tar.gz
+    git config --global --add safe.directory /opt/openmc
     cmake -S /opt/openmc -B /opt/openmc/build
     cmake --build /opt/openmc/build -j"$(nproc)"
     cmake --install /opt/openmc/build
@@ -77,7 +85,7 @@ From: docker.m.daocloud.io/library/ubuntu:24.04
         sudo apptainer build openmc_v0.15.3.sif openmc.def
 
     Check the executable:
-        apptainer run openmc_v0.15.3.sif --version
+        apptainer run openmc_v0.15.3.sif openmc --version
 
     Check the Python API:
         apptainer exec openmc_v0.15.3.sif python -c "import openmc; print(openmc.__version__)"
@@ -85,4 +93,4 @@ From: docker.m.daocloud.io/library/ubuntu:24.04
     Run a model. Nuclear data is not inside the image; bind it and set OPENMC_CROSS_SECTIONS:
         apptainer run --bind /path/to/endfb-vii.1-hdf5:/data \
             --env OPENMC_CROSS_SECTIONS=/data/cross_sections.xml \
-            openmc_v0.15.3.sif
+            openmc_v0.15.3.sif openmc
